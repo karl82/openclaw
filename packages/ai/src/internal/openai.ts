@@ -18,6 +18,7 @@ export {
 } from "../providers/openai-tool-projection.js";
 export {
   codeModeToolSurfaceObserver,
+  measuredRequestPressure,
   reasoningTagTextPolicy,
   type CodeModeToolSurfaceObservation,
 } from "../provider-options.js";
@@ -35,5 +36,4 @@ export { bindResponsesInputMessage } from "../transports/openai-responses-replay
 export {
   encodedModelRequestBodyStream,
   modelRequestBodyState,
-  serializeModelRequestBody,
 } from "../transports/model-request-body.js";

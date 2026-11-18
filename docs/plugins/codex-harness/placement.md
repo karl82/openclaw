@@ -175,3 +175,8 @@ forwarded. A configured GitHub execution identity is admitted for the original
 operator and session, installed in a private worker profile, refreshed only after
 worker acknowledgement, and revoked when the duplex ends. Enterprise credentials
 remain bound to their issuer host.
+
+Retained reconnects require their existing native state. A confirmed lost-worker
+replacement may bootstrap a fresh native thread from the retained conversation;
+it never resumes a process from the lost worker. Worker diagnostics report bounded
+exit facts and classifications without forwarding native stderr content.

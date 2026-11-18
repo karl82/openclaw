@@ -19,12 +19,18 @@ import { readCodexPlacementWorkspaceIdentity } from "./sandbox-exec-server.js";
 import { trackIsolatedCodexAppServerClient } from "./shared-client-lifecycle.js";
 import type { CodexAppServerClientFactory } from "./shared-client.js";
 import type { CodexAppServerTransport } from "./transport.js";
+import {
+  createWorkerDiagnosticReceiver,
+  type WorkerDuplexCloseOrigin,
+} from "./worker-diagnostics.js";
 
 const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 
 export function createCodexWorkerClientFactory(params: {
   runtime?: Pick<PluginRuntime, "nodes">;
   agentId?: string;
+  confirmedLossPredecessor?: () => boolean;
+  requiresExistingNativeState?: () => boolean;
   permissionMode?: EmbeddedRunAttemptParamsV2["permissionMode"];
   sandbox: SandboxContext;
   signal: AbortSignal;
@@ -55,6 +61,12 @@ export function createCodexWorkerClientFactory(params: {
     await options?.assertCurrentAsync?.();
     assertCurrent();
     const workspace = readCodexPlacementWorkspaceIdentity(params.sandbox);
+    if (params.requiresExistingNativeState?.()) {
+      workspace.requireExistingNativeState = true;
+    }
+    if (params.confirmedLossPredecessor?.()) {
+      delete workspace.requireExistingNativeState;
+    }
     const grant = params.agentId
       ? await prepareWorkerGitHubBindingGrant({
           sessionId: workspace.sessionId,
@@ -98,6 +110,7 @@ export function createCodexWorkerClientFactory(params: {
       throw error;
     }
     const channel = acquiredChannel;
+    const diagnostics = createWorkerDiagnosticReceiver();
     let renewalTimer: ReturnType<typeof setInterval> | undefined;
     let renewalWork: Promise<void> | undefined;
     let grantRevocation: Promise<void> | undefined;
@@ -109,7 +122,7 @@ export function createCodexWorkerClientFactory(params: {
     let signalCode: string | null = null;
     let exitError: Error | undefined;
     let nativeExit: { code: number | null; signal: string | null } | undefined;
-    const finish = (local: boolean, error?: unknown) => {
+    const finish = (local: boolean, error?: unknown, origin?: WorkerDuplexCloseOrigin) => {
       if (closed) {
         return;
       }
@@ -126,6 +139,17 @@ export function createCodexWorkerClientFactory(params: {
         embeddedAgentLog.warn(
           "Worker GitHub credential cleanup failed; the token may remain valid until expiry.",
         ),
+      );
+      diagnostics.close(
+        origin ??
+          (local
+            ? signal.aborted
+              ? "local_abort"
+              : "local_kill"
+            : error
+              ? "remote_rejected"
+              : "remote_resolved"),
+        error,
       );
       signal.removeEventListener("abort", onAbort);
       unsubscribe?.();
@@ -174,7 +198,7 @@ export function createCodexWorkerClientFactory(params: {
         );
       },
       final(callback) {
-        finish(true);
+        finish(true, undefined, "local_stdin_final");
         callback();
       },
     });
@@ -212,6 +236,9 @@ export function createCodexWorkerClientFactory(params: {
     trackIsolatedCodexAppServerClient(client);
     const unsubscribe = channel.onMessage(async (frame) => {
       if (closed) {
+        return;
+      }
+      if (diagnostics.consume(frame)) {
         return;
       }
       if (!frame.byteLength || frame.byteLength > MAX_FRAME_BYTES) {
@@ -316,7 +343,11 @@ export function createCodexWorkerClientFactory(params: {
             .catch(() => {
               // Unknown installation cannot extend the old credential's admitted lifetime.
               if (!closed) {
-                finish(true, new Error("Worker GitHub credential renewal failed"));
+                finish(
+                  true,
+                  new Error("Worker GitHub credential renewal failed"),
+                  "local_credential_failure",
+                );
               }
             })
             .finally(() => {

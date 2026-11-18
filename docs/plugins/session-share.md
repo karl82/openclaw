@@ -124,6 +124,11 @@ Reads recheck the same source group and canonical-profile boundary. Disconnects,
 reconnects, and configuration replacement invalidate in-flight replies. These
 connections expose no steering or other mutation operation.
 
+The console refreshes a selected read-only Gateway transcript every five seconds
+while its pane is visible. Only one read runs at a time. Polling retains loaded
+older history when the new page overlaps it; a reset or gap replaces that window.
+Hiding the pane or losing its connection retires pending reads.
+
 ## Enable the receiver and pair the source
 
 On the receiver Gateway:
